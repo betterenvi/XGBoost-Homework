@@ -1,7 +1,6 @@
 #! /usr/bin/python
 import pandas as pd
 import xgboost as xgb
-from sklearn.preprocessing import OneHotEncoder
 
 df = pd.read_csv("train.csv")
 df.drop("Id", axis=1, inplace=True)
@@ -18,6 +17,7 @@ param = {'objective': 'reg:linear',
         'silent': 1,
         'nthread': 4,
         'save_period': 0}
-num_round = 1000
-watchlist = [(dtest, 'eval'), (dtrain, 'train')]
-bst = xgb.train(param, dtrain, num_round, watchlist)
+num_round = 1502
+watchlist = [(dtrain, 'train'), (dtest, 'eval')]
+bst = xgb.train(param, dtrain, num_round, watchlist, early_stopping_rounds=150)
+print(bst.best_iteration, bst.best_ntree_limit, bst.best_score)
