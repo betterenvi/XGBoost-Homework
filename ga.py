@@ -6,6 +6,7 @@ import xgboost as xgb
 from deap import base
 from deap import creator
 from deap import tools
+from pandas import DataFrame, Series
 import matplotlib.pyplot as plt
 
 df = pd.read_csv("train.csv")
@@ -14,11 +15,26 @@ data = pd.get_dummies(df)
 X, Y = data.iloc[:,1:].values, data["Score"].values
 allY = {'Y':Y, 'log':np.log(Y + 1), 'sqrt':np.sqrt(Y), 'sq':Y**2}
 RANGE_Y = range(0, 71)
-
 n = int(X.shape[0] * 0.8)
-
-dtrain = xgb.DMatrix(X[:n], label=Y[:n])
-dtest = xgb.DMatrix(X[n:], label=Y[n:])
+num_tot_train, num_tot_test = n, X.shape[0] - n
+CUT_BINS = [-1, 5, 10, 20, 75]
+Y_bins = pd.cut(Y, CUT_BINS)
+Y_bins_set = sorted(set(Y_bins))
+Y_bins_set2number = Series(range(len(Y_bins_set)), index=Y_bins_set)
+Y_bins_number = Y_bins_set2number[Y_bins].values
+dtrain = xgb.DMatrix(X[:n], label=Y_bins_number[:n])
+dtest = xgb.DMatrix(X[n:], label=Y_bins_number[n:])
+sub_dtrain = {}
+sub_dtest = {}
+sub_ntrain = {}
+sub_ntest = {}
+for yb in Y_bins_set:
+    train_sel = Y_bins[:n] == yb
+    test_sel = Y_bins[n:] == yb
+    sub_dtrain[yb] = xgb.DMatrix(X[:n][train_sel], label=Y[:n][train_sel])
+    sub_dtest[yb] = xgb.DMatrix(X[n:][test_sel], label=Y[n:][test_sel])
+    sub_ntrain[yb] = sum(train_sel)
+    sub_ntest[yb] = sum(test_sel)
 
 creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
 creator.create("Individual", list, fitness=creator.FitnessMin)
@@ -28,12 +44,13 @@ gen_max_depth = lambda : random.randint(1, 10)
 gen_eta = lambda : random.random()
 gen_gamma = lambda : random.randint(0, 10)
 gen_funcs = [gen_objective, gen_max_depth, gen_eta, gen_gamma]
-gen_splits = lambda : [-1] + sorted(random.sample(range(1, 20), 4) + random.sample(range(20, 70), 3)) + [75]
+num_gen_funcs = len(gen_funcs)
+#gen_splits = lambda : [-1] + sorted(random.sample(range(1, 20), 4) + random.sample(range(20, 70), 3)) + [75]
 def gen_param():
     param = list()
-    for func in gen_funcs:
-        param.append(func())
-    param.extend(gen_splits)
+    for b in range(len(Y_bins_set)):
+        for func in gen_funcs:
+            param.append(func())
     return param
 
 IND_SIZE=1
@@ -46,20 +63,26 @@ toolbox.register('gen_param', gen_param)
 toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.gen_param)
 toolbox.register("population", tools.initRepeat, list, toolbox.individual)
 def evaluate(indiv):
-    param = {'objective': indiv[0],
-        'max_depth': indiv[1],
-        'eta': indiv[2],
-        'gamma': indiv[3],
-        'silent': 1,
-        'nthread': 4,
-        'save_period': 0,
-        'eval_metric': 'rmse'}
-    Y_bins = pd.cut(Y, indiv[4:])
-    num_round = 1502
-    watchlist = [(dtrain, 'train'), (dtest, 'eval')]
-    bst = xgb.train(param, dtrain, num_round, watchlist, early_stopping_rounds=150, verbose_eval=50)
-    print(bst.best_iteration, bst.best_ntree_limit, bst.best_score)
-    return bst.best_score,
+    overall_score = 0.0
+    for yb_idx, yb in enumerate(Y_bins_set):
+        sub_indiv = indiv[(yb_idx * num_gen_funcs):((yb_idx + 1) * num_gen_funcs)]
+        param = {'objective': sub_indiv[0],
+            'max_depth': sub_indiv[1],
+            'eta': sub_indiv[2],
+            'gamma': sub_indiv[3],
+            'silent': 1,
+            'nthread': 4,
+            'save_period': 0,
+            'eval_metric': 'rmse'}
+        num_round = 1502
+        watchlist = [(sub_dtrain[yb], 'train'), (sub_dtest[yb], 'eval')]
+        bst = xgb.train(param, sub_dtrain[yb], num_round, watchlist, early_stopping_rounds=150, verbose_eval=False)
+        # print(yb, bst.best_iteration, bst.best_ntree_limit, bst.best_score)
+        overall_score += (bst.best_score ** 2) * sub_ntest[yb]
+        print '\t', yb, bst.best_score, sub_ntest[yb]
+    overall_score = np.sqrt(overall_score / num_tot_test)
+    print overall_score
+    return overall_score,
 
 def mut_indiv(indiv, indiv_pb):
     for i, ele in enumerate(indiv):
@@ -71,7 +94,7 @@ toolbox.register("mate", tools.cxTwoPoint)
 toolbox.register("mutate", mut_indiv, indiv_pb=0.05)
 toolbox.register("select", tools.selTournament, tournsize=3)
 
-NGEN = 100
+NGEN = 2
 CXPB, MUTPB = 0.5, 0.2
 pop = toolbox.population(n=300)
 fitnesses = list(map(toolbox.evaluate, pop))
