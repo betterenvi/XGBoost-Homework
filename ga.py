@@ -8,7 +8,10 @@ from deap import creator
 from deap import tools
 from pandas import DataFrame, Series
 import matplotlib.pyplot as plt
+from MyGA import *
 
+#CUT_BINS = [-1, 5, 10, 20, 75]
+CUT_BINS = [-1, 5, 75]
 df = pd.read_csv("train.csv")
 df.drop("Id", axis=1, inplace=True)
 data = pd.get_dummies(df)
@@ -16,36 +19,74 @@ X, Y = data.iloc[:,1:].values, data["Score"].values
 allY = {'Y':Y, 'log':np.log(Y + 1), 'sqrt':np.sqrt(Y), 'sq':Y**2}
 RANGE_Y = range(0, 71)
 n = int(X.shape[0] * 0.8)
-num_tot_train, num_tot_test = n, X.shape[0] - n
-CUT_BINS = [-1, 5, 10, 20, 75]
+ntrain, ntest = n, X.shape[0] - n
+
 Y_bins = pd.cut(Y, CUT_BINS)
 Y_bins_set = sorted(set(Y_bins))
+nbins = len(Y_bins_set)
 Y_bins_set2number = Series(range(len(Y_bins_set)), index=Y_bins_set)
 Y_bins_number = Y_bins_set2number[Y_bins].values
-dtrain = xgb.DMatrix(X[:n], label=Y_bins_number[:n])
-dtest = xgb.DMatrix(X[n:], label=Y_bins_number[n:])
+dtrain = xgb.DMatrix(X[:n], label=Y[:n])
+dtest = xgb.DMatrix(X[n:], label=Y[n:])
+cls_dtrain = xgb.DMatrix(X[:n], label=Y_bins_number[:n])
+cls_dtest = xgb.DMatrix(X[n:], label=Y_bins_number[n:])
+
+gen_max_depth = lambda : random.randint(1, 5)
+gen_eta = lambda : random.random() * 0.5
+gen_funcs = [gen_max_depth, gen_eta]
+def cls_gen_param():
+    param = list()
+    for func in gen_funcs:
+        param.append(func())
+    return param
+
+def cls_train(indiv, num_round=1500):
+    param = {
+    'objective': 'multi:softmax',
+    'max_depth': indiv[0],
+    'eta': indiv[1],
+    'silent': 1,
+    'nthread': 4,
+    'num_class': nbins}
+    watchlist = [(cls_dtrain, 'cls_dtrain'), (cls_dtest, 'cls_dtest')]
+    bst = xgb.train(param, cls_dtrain, num_round, watchlist, early_stopping_rounds=150, verbose_eval=50)
+    print(indiv, bst.best_iteration, bst.best_ntree_limit, bst.best_score)
+    return bst
+
+def cls_evaluate(indiv):
+    bst = cls_train(indiv)
+    return bst.best_score,
+
+def cls_mut_indiv(indiv, indiv_pb):
+    for i, ele in enumerate(indiv):
+        if random.random() < indiv_pb:
+            indiv[i] = cls_gen_funcs[i]()
+
+cls_bst = cls_train([3, 0.05], 237)
+cls_pred = cls_bst.predict(cls_dtest)
+
 sub_dtrain = {}
-sub_dtest = {}
 sub_ntrain = {}
+sub_dtest = {}
 sub_ntest = {}
-for yb in Y_bins_set:
+for yb_idx, yb in enumerate(Y_bins_set):
     train_sel = Y_bins[:n] == yb
-    test_sel = Y_bins[n:] == yb
     sub_dtrain[yb] = xgb.DMatrix(X[:n][train_sel], label=Y[:n][train_sel])
-    sub_dtest[yb] = xgb.DMatrix(X[n:][test_sel], label=Y[n:][test_sel])
     sub_ntrain[yb] = sum(train_sel)
+    test_sel = cls_pred == yb_idx
+    sub_dtest[yb] = xgb.DMatrix(X[n:][test_sel], label=Y[n:][test_sel])
     sub_ntest[yb] = sum(test_sel)
 
-creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-creator.create("Individual", list, fitness=creator.FitnessMin)
 
+# best ? ['count:poisson', 3, 0.04375073666234408, 0]
+gen_objective = lambda : random.choice(['count:poisson'])
 gen_objective = lambda : random.choice(['reg:linear', 'count:poisson'])
 gen_max_depth = lambda : random.randint(1, 10)
-gen_eta = lambda : random.random()
+#gen_eta = lambda : random.choice([0.04375073666234408, 0.3464085982132564,0.40045324570183705, 0.645319692228763 ]) #random.random() * 0.3
+gen_eta = lambda : random.random() * 0.3
 gen_gamma = lambda : random.randint(0, 10)
 gen_funcs = [gen_objective, gen_max_depth, gen_eta, gen_gamma]
 num_gen_funcs = len(gen_funcs)
-#gen_splits = lambda : [-1] + sorted(random.sample(range(1, 20), 4) + random.sample(range(20, 70), 3)) + [75]
 def gen_param():
     param = list()
     for b in range(len(Y_bins_set)):
@@ -53,18 +94,16 @@ def gen_param():
             param.append(func())
     return param
 
-IND_SIZE=1
-toolbox = base.Toolbox()
-# toolbox.register("attr_objective", random.choice, ['reg:linear', 'count:poisson'])
-# toolbox.register("attr_max_depth", random.randint, 1, 10)
-# toolbox.register("attr_eta", random.random)
-# toolbox.register("attr_gamma", random.randint, 0, 10)
-toolbox.register('gen_param', gen_param)
-toolbox.register("individual", tools.initIterate, creator.Individual, toolbox.gen_param)
-toolbox.register("population", tools.initRepeat, list, toolbox.individual)
-def evaluate(indiv):
+def train(indiv):
     overall_score = 0.0
+    sub_bst = dict()
+    cls_pred = cls_bst.predict(cls_dtest)
+    sub_dtest = {}
+    sub_ntest = {}
     for yb_idx, yb in enumerate(Y_bins_set):
+        test_sel = cls_pred == yb_idx
+        sub_dtest[yb] = xgb.DMatrix(X[n:][test_sel], label=Y[n:][test_sel])
+        sub_ntest[yb] = sum(test_sel)
         sub_indiv = indiv[(yb_idx * num_gen_funcs):((yb_idx + 1) * num_gen_funcs)]
         param = {'objective': sub_indiv[0],
             'max_depth': sub_indiv[1],
@@ -79,73 +118,22 @@ def evaluate(indiv):
         bst = xgb.train(param, sub_dtrain[yb], num_round, watchlist, early_stopping_rounds=150, verbose_eval=False)
         # print(yb, bst.best_iteration, bst.best_ntree_limit, bst.best_score)
         overall_score += (bst.best_score ** 2) * sub_ntest[yb]
-        print '\t', yb, bst.best_score, sub_ntest[yb]
-    overall_score = np.sqrt(overall_score / num_tot_test)
+        print '\t', sub_indiv, yb, bst.best_score, sub_ntest[yb]
+        sub_bst[yb] = bst
+    overall_score = np.sqrt(overall_score / ntest)
     print overall_score
+    return sub_bst, overall_score
+
+def evaluate(indiv):
+    sub_bst, overall_score = train(indiv)
     return overall_score,
+
 
 def mut_indiv(indiv, indiv_pb):
     for i, ele in enumerate(indiv):
         if random.random() < indiv_pb:
-            indiv[i] = gen_funcs[i]()
+            indiv[i] = gen_funcs[i % num_gen_funcs]()
 
-toolbox.register("evaluate", evaluate)
-toolbox.register("mate", tools.cxTwoPoint)
-toolbox.register("mutate", mut_indiv, indiv_pb=0.05)
-toolbox.register("select", tools.selTournament, tournsize=3)
-
-NGEN = 2
-CXPB, MUTPB = 0.5, 0.2
-pop = toolbox.population(n=300)
-fitnesses = list(map(toolbox.evaluate, pop))
-for ind, fit in zip(pop, fitnesses):
-    ind.fitness.values = fit
-
-fisrt_gen = copy.deepcopy(pop)
-pickle.dump(fisrt_gen, open('pop.pkl', 'wb'))
-
-all_gens = [fisrt_gen]
-
-def get_best(pop):
-    best, best_fitness = pop[1], pop[1].fitness.values
-    for indiv in pop[1:]:
-        if indiv.fitness.values < best_fitness:
-            best_fitness = indiv.fitness.values
-            best = indiv
-    return best, best_fitness
-
-for g in range(NGEN):
-    print("-- Generation %i --" % g)
-    offspring = toolbox.select(pop, len(pop))
-    # Clone the selected individuals
-    offspring = list(map(toolbox.clone, offspring))
-    for child1, child2 in zip(offspring[::2], offspring[1::2]):
-        if random.random() < CXPB:
-            toolbox.mate(child1, child2)
-            del child1.fitness.values
-            del child2.fitness.values
-
-    for mutant in offspring:
-        if random.random() < MUTPB:
-            toolbox.mutate(mutant)
-            del mutant.fitness.values
-    # Evaluate the individuals with an invalid fitness
-    invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
-    fitnesses = map(toolbox.evaluate, invalid_ind)
-    for ind, fit in zip(invalid_ind, fitnesses):
-        ind.fitness.values = fit
-
-    pop[:] = offspring
-    all_gens.append(copy.deepcopy(pop))
-
-    fits = [ind.fitness.values[0] for ind in pop]
-
-    length = len(pop)
-    mean = sum(fits) / length
-    sum2 = sum(x*x for x in fits)
-    std = abs(sum2 / length - mean**2)**0.5
-
-    print("  Min %s" % min(fits))
-    print("  Max %s" % max(fits))
-    print("  Avg %s" % mean)
-    print("  Std %s" % std)
+ga = MyGA(gen_param, evaluate, mut_indiv, CXPB=0.5, MUTPB=0.2)
+ga.init_pop(NPOP=10)
+ga.iterate(NGEN=3)
