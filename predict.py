@@ -21,13 +21,13 @@ num_round = 1191
 bst = xgb.train(param, dtrain, num_round)
 
 df = pd.read_csv('test.csv')
+Id = df['Id']
 df.drop("Id", axis=1, inplace=True)
 X = pd.get_dummies(df).values
 print('test shape', X.shape)
 dtest = xgb.DMatrix(X)
 Y = bst.predict(dtest)
 
-with open('1601214449_predict.txt', 'w') as f:
-    print('Id,Score', file=f)
-    for i in range(Y.shape[0]):
-        print("%d,%d" % (40001+i, int(Y[i])), file=f)
+res = pd.DataFrame({}, index=Id)
+res['Score'] = Y
+res.to_csv('1601214449_predict.csv', header=True, index=True, sep=',')
