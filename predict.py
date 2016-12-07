@@ -9,14 +9,15 @@ X, Y = data.iloc[:,1:].values, data["Score"].values
 print('train shape', X.shape)
 
 dtrain = xgb.DMatrix(X, label=Y)
-param = {'objective': 'reg:linear',
-        'max_depth': 2,
-        'eta': 0.1,
-        'gamma': 0.1,
+param = {'objective': 'count:poisson',
+        'max_depth': 3,
+        'eta': 0.04375073666234408,
+        'gamma': 0,
         'silent': 1,
-        'nthread': 6,
-        'save_period': 0}
-num_round = 1103
+        'nthread': 4,
+        'save_period': 0,
+        'eval_metric': 'rmse'}
+num_round = 1191
 bst = xgb.train(param, dtrain, num_round)
 
 df = pd.read_csv('test.csv')

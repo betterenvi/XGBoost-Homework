@@ -11,9 +11,9 @@ n = int(X.shape[0] * 0.8)
 dtrain = xgb.DMatrix(X[:n], label=Y[:n])
 dtest = xgb.DMatrix(X[n:], label=Y[n:])
 param = {'objective': 'count:poisson',
-        'max_depth': 2,
-        'eta': 0.1,
-        'gamma': 0.1,
+        'max_depth': 3,
+        'eta': 0.04375073666234408,
+        'gamma': 0,
         'silent': 1,
         'nthread': 4,
         'save_period': 0,
