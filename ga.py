@@ -13,6 +13,7 @@ df.drop("Id", axis=1, inplace=True)
 data = pd.get_dummies(df)
 X, Y = data.iloc[:,1:].values, data["Score"].values
 allY = {'Y':Y, 'log':np.log(Y + 1), 'sqrt':np.sqrt(Y), 'sq':Y**2}
+RANGE_Y = range(0, 71)
 
 n = int(X.shape[0] * 0.8)
 
@@ -27,10 +28,12 @@ gen_max_depth = lambda : random.randint(1, 10)
 gen_eta = lambda : random.random()
 gen_gamma = lambda : random.randint(0, 10)
 gen_funcs = [gen_objective, gen_max_depth, gen_eta, gen_gamma]
+gen_splits = lambda : [-1] + sorted(random.sample(range(1, 20), 4) + random.sample(range(20, 70), 3)) + [75]
 def gen_param():
     param = list()
     for func in gen_funcs:
         param.append(func())
+    param.extend(gen_splits)
     return param
 
 IND_SIZE=1
@@ -51,7 +54,7 @@ def evaluate(indiv):
         'nthread': 4,
         'save_period': 0,
         'eval_metric': 'rmse'}
-
+    Y_bins = pd.cut(Y, indiv[4:])
     num_round = 1502
     watchlist = [(dtrain, 'train'), (dtest, 'eval')]
     bst = xgb.train(param, dtrain, num_round, watchlist, early_stopping_rounds=150, verbose_eval=50)
