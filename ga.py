@@ -10,8 +10,6 @@ from pandas import DataFrame, Series
 import matplotlib.pyplot as plt
 from MyGA import *
 
-#CUT_BINS = [-1, 5, 10, 20, 75]
-CUT_BINS = [-1, 5, 75]
 df = pd.read_csv("train.csv")
 df.drop("Id", axis=1, inplace=True)
 data = pd.get_dummies(df)
@@ -21,6 +19,9 @@ RANGE_Y = range(0, 71)
 n = int(X.shape[0] * 0.8)
 ntrain, ntest = n, X.shape[0] - n
 
+#CUT_BINS = [-1, 5, 10, 20, 75]
+CUT_BINS = [-1, 5, 75]
+CUT_BINS = [-1, 75]
 Y_bins = pd.cut(Y, CUT_BINS)
 Y_bins_set = sorted(set(Y_bins))
 nbins = len(Y_bins_set)
@@ -78,12 +79,12 @@ for yb_idx, yb in enumerate(Y_bins_set):
     sub_ntest[yb] = sum(test_sel)
 
 
-# best ? ['count:poisson', 3, 0.04375073666234408, 0]
+# best ? ['count:poisson', 3, 0.04375073666234408, 0], 3.656079
 gen_objective = lambda : random.choice(['count:poisson'])
 gen_objective = lambda : random.choice(['reg:linear', 'count:poisson'])
 gen_max_depth = lambda : random.randint(1, 10)
 #gen_eta = lambda : random.choice([0.04375073666234408, 0.3464085982132564,0.40045324570183705, 0.645319692228763 ]) #random.random() * 0.3
-gen_eta = lambda : random.random() * 0.3
+gen_eta = lambda : random.random() * 1
 gen_gamma = lambda : random.randint(0, 10)
 gen_funcs = [gen_objective, gen_max_depth, gen_eta, gen_gamma]
 num_gen_funcs = len(gen_funcs)
@@ -97,13 +98,7 @@ def gen_param():
 def train(indiv):
     overall_score = 0.0
     sub_bst = dict()
-    cls_pred = cls_bst.predict(cls_dtest)
-    sub_dtest = {}
-    sub_ntest = {}
     for yb_idx, yb in enumerate(Y_bins_set):
-        test_sel = cls_pred == yb_idx
-        sub_dtest[yb] = xgb.DMatrix(X[n:][test_sel], label=Y[n:][test_sel])
-        sub_ntest[yb] = sum(test_sel)
         sub_indiv = indiv[(yb_idx * num_gen_funcs):((yb_idx + 1) * num_gen_funcs)]
         param = {'objective': sub_indiv[0],
             'max_depth': sub_indiv[1],
@@ -132,8 +127,17 @@ def evaluate(indiv):
 def mut_indiv(indiv, indiv_pb):
     for i, ele in enumerate(indiv):
         if random.random() < indiv_pb:
-            indiv[i] = gen_funcs[i % num_gen_funcs]()
+            tp = type(indiv[i])
+            func_idx = i % num_gen_funcs
+            if func_idx == 0:
+                indiv[i] = gen_funcs[func_idx]()
+            elif func_idx == 1:
+                indiv[i] = max(1, indiv[i] + random.choice([1, -1]))
+            elif func_idx == 2:
+                indiv[i] = min(0.9, indiv[i] * (random.random() + 0.5))
+            elif func_idx == 3:
+                indiv[i] = max(0, indiv[i] + random.choice([1, -1]))
 
 ga = MyGA(gen_param, evaluate, mut_indiv, CXPB=0.5, MUTPB=0.2)
-ga.init_pop(NPOP=10)
-ga.iterate(NGEN=3)
+ga.init_pop(NPOP=30)
+ga.iterate(NGEN=10)
