@@ -18,7 +18,7 @@ param = {'objective': 'count:poisson',
         'nthread': 4,
         'save_period': 0,
         'eval_metric': 'rmse'}
-num_round = 1502
+num_round = 1191
 watchlist = [(dtrain, 'train'), (dtest, 'eval')]
 bst = xgb.train(param, dtrain, num_round, watchlist, early_stopping_rounds=150, verbose_eval=10)
 print(bst.best_iteration, bst.best_ntree_limit, bst.best_score)
