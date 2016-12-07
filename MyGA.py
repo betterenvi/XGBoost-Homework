@@ -18,6 +18,7 @@ class MyGA(object):
         self.all_gens = list()
         self.CXPB = CXPB
         self.MUTPB = MUTPB
+        self.NGEN = 0
 
     def init_pop(self, NPOP=10):
         self.NPOP = NPOP
@@ -38,7 +39,7 @@ class MyGA(object):
         return best, best_fitness
 
     def iterate(self, NGEN=10):
-        self.NGEN = NGEN
+        self.NGEN += NGEN
         for g in range(NGEN):
             print("-- Generation %i --" % g)
             pop = self.pop
@@ -75,11 +76,3 @@ class MyGA(object):
             print("  Max %s" % max(fits))
             print("  Avg %s" % mean)
             print("  Std %s" % std)
-
-
-
-
-
-
-
-
